@@ -1,5 +1,4 @@
 import streamlit as st
-from dotenv import load_dotenv
 from groq import Groq
 import os
 import sys
@@ -7,9 +6,8 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from rag.retriever import load_retriever
 
-load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 st.set_page_config(page_title="AI Travel Concierge", page_icon="✈️", layout="wide")
 
