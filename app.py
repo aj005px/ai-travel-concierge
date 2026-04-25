@@ -1,107 +1,105 @@
 import streamlit as st
-from groq import Groq
+from dotenv import load_dotenv
 import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from agents.travel_agent import create_travel_agent, run_agent
 from rag.retriever import load_retriever
+from langchain_core.messages import HumanMessage, AIMessage
 
+load_dotenv()
 
-client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", "")
+os.environ["SERPER_API_KEY"] = os.getenv("SERPER_API_KEY") or st.secrets.get("SERPER_API_KEY", "")
 
 st.set_page_config(page_title="AI Travel Concierge", page_icon="✈️", layout="wide")
+
+@st.cache_resource
+def get_agent():
+    try:
+        return create_travel_agent()
+    except Exception as e:
+        st.error(f"Agent error: {e}")
+        return None, []
 
 @st.cache_resource
 def get_retriever():
     try:
         return load_retriever()
-    except Exception as e:
+    except:
         return None
 
+agent, tools = get_agent()
 retriever = get_retriever()
 
 # Sidebar
 with st.sidebar:
     st.title("✈️ AI Travel Concierge")
     st.markdown("---")
-
+    st.markdown("### 🛠️ Active Tools")
+    st.success("🔍 Web Search — ON")
+    st.success("🌤️ Weather — ON")
     if retriever:
-        st.success("✅ World travel knowledge base loaded!")
+        st.success("📚 Travel Knowledge Base — ON")
     else:
-        st.error("❌ No knowledge base found")
-        st.info("Add PDFs to docs/ folder and run:\npython rag/ingest.py")
-
+        st.warning("📚 Knowledge Base — OFF")
     st.markdown("---")
     st.markdown("### 💡 Try asking:")
-    st.markdown("- Best places to visit in Japan?")
-    st.markdown("- What currency is used in Thailand?")
-    st.markdown("- Best time to visit Paris?")
-    st.markdown("- Visa requirements for Dubai?")
-    st.markdown("- Top foods to try in Italy?")
+    st.markdown("- 🌤️ What's the weather in Tokyo?")
+    st.markdown("- 🗺️ Plan a 5 day trip to Paris")
+    st.markdown("- 🛂 Visa requirements for Dubai?")
+    st.markdown("- 🏨 Best hotels in Bali?")
+    st.markdown("- ✈️ Best time to visit Japan?")
     st.markdown("---")
-
     if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []
+        st.session_state.chat_history = []
         st.rerun()
 
 # Main
 st.title("✈️ AI Travel Concierge")
-st.write("Ask me anything about travel — powered by a real world travel guide!")
+st.write("Your smart travel assistant with real-time web search and weather! 🌍")
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "system",
-            "content": """You are an expert AI travel concierge with knowledge of
-destinations all around the world. Help users plan trips, suggest destinations,
-explain visa requirements, recommend hotels and food, and give travel tips.
-Always be friendly, helpful and specific in your answers.
-When given context from travel documents, use it to give accurate answers.
-If the context doesnt cover something, use your own knowledge."""
-        }
-    ]
+    st.session_state.messages = []
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 # Display chat history
-for msg in st.session_state.messages[1:]:
+for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
 # User input
-user_input = st.chat_input("E.g. What are the must see places in Tokyo?")
+user_input = st.chat_input("Ask me anything about travel...")
 
 if user_input:
-    context = ""
+    full_input = user_input
     if retriever:
-        with st.spinner("🔍 Searching world travel guide..."):
+        try:
             docs = retriever.invoke(user_input)
             if docs:
                 context = "\n\n".join([doc.page_content for doc in docs])
+                full_input = f"{user_input}\n\nContext from travel guide:\n{context[:1000]}"
+        except:
+            pass
 
-    if context:
-        prompt = f"""Use the following travel guide information to answer the question.
-If the information is not in the context, use your own travel knowledge.
-
-TRAVEL GUIDE CONTEXT:
-{context}
-
-USER QUESTION: {user_input}"""
-    else:
-        prompt = user_input
-
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.write(user_input)
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=st.session_state.messages,
-                max_tokens=1024,
-            )
-            reply = response.choices[0].message.content
+        with st.spinner("🤔 Searching and thinking..."):
+            try:
+                reply = run_agent(agent, tools, full_input, st.session_state.chat_history)
+            except Exception as e:
+                reply = f"Sorry, I hit an error: {str(e)}. Please try again!"
+
             st.write(reply)
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": reply
-            })
+            st.session_state.messages.append({"role": "assistant", "content": reply})
+            st.session_state.chat_history.extend([
+                HumanMessage(content=user_input),
+                AIMessage(content=reply)
+            ])
