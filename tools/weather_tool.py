@@ -1,9 +1,9 @@
 import requests
 from langchain_core.tools import tool
 
-@tool
+@tool("get_weather", return_direct=False)
 def get_weather(city: str) -> str:
-    """Get current weather and 3-day forecast for a travel destination city."""
+    """Get current weather and 3-day forecast for a city. Input should be a city name string."""
     try:
         geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1"
         geo_response = requests.get(geo_url, timeout=10)

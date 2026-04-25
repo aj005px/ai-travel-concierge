@@ -1,10 +1,9 @@
 from langchain_core.tools import tool
 from langchain_community.utilities import GoogleSerperAPIWrapper
-import os
 
-@tool
+@tool("web_search", return_direct=False)
 def web_search(query: str) -> str:
-    """Search the web for travel information, visa requirements, hotels, flights, and destination guides."""
+    """Search the web for travel info, hotels, visa requirements and destination guides. Input should be a search query string."""
     try:
         search = GoogleSerperAPIWrapper()
         return search.run(query)

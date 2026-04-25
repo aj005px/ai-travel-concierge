@@ -3,7 +3,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from tools.weather_tool import get_weather
 from tools.search_tool import web_search
 
@@ -13,54 +13,60 @@ def create_travel_agent():
         api_key=os.getenv("GROQ_API_KEY"),
         temperature=0.7
     )
-    tools = [web_search, get_weather]
-    llm_with_tools = llm.bind_tools(tools)
-    return llm_with_tools, tools
+    return llm, [web_search, get_weather]
 
-def run_agent(llm_with_tools, tools, user_input, chat_history=[]):
-    tool_map = {t.name: t for t in tools}
+def run_agent(llm, tools, user_input, chat_history=[]):
+    tool_results = ""
 
-    system_prompt = """You are an expert AI travel concierge.
-Use tools to answer travel questions accurately.
-- Weather questions → call get_weather once
-- Hotel/visa/trip questions → call web_search once
-- Trip planning → call both tools once each
-After getting tool results, give a helpful final answer. Do NOT call tools again after getting results."""
+    # Detect weather intent
+    weather_keywords = ["weather", "temperature", "forecast", "climate", "hot", "cold", "rain", "humid"]
+    needs_weather = any(w in user_input.lower() for w in weather_keywords)
 
-    messages = [SystemMessage(content=system_prompt)]
+    # Detect search intent
+    search_keywords = ["hotel", "hotels", "cheap", "best", "visa", "flight", "food", "places", "visit", "trip", "plan", "restaurant", "budget", "cost", "ticket", "resort", "stay", "book"]
+    needs_search = any(w in user_input.lower() for w in search_keywords)
+
+    # If neither detected, default to search
+    if not needs_weather and not needs_search:
+        needs_search = True
+
+    # Call weather tool
+    if needs_weather:
+        # Extract city name using LLM
+        city_response = llm.invoke([
+            SystemMessage(content="Extract only the city name from the user message. Reply with just the city name, nothing else."),
+            HumanMessage(content=user_input)
+        ])
+        city = city_response.content.strip()
+        print(f"🌤️ Getting weather for: {city}")
+        weather_result = get_weather.invoke({"city": city})
+        tool_results += f"\nWEATHER DATA:\n{weather_result}\n"
+
+    # Call search tool
+    if needs_search:
+        print(f"🔍 Searching for: {user_input}")
+        search_result = web_search.invoke({"query": user_input})
+        tool_results += f"\nSEARCH RESULTS:\n{search_result}\n"
+
+    # Build final prompt
+    messages = [
+        SystemMessage(content="""You are an expert AI travel concierge.
+Use the tool results provided to give accurate, helpful travel advice.
+Be friendly, specific and detailed in your response.""")
+    ]
+
     for msg in chat_history:
         messages.append(msg)
-    messages.append(HumanMessage(content=user_input))
 
-    # Pass 1 — get tool calls
-    response = llm_with_tools.invoke(messages)
-    messages.append(response)
+    if tool_results:
+        messages.append(HumanMessage(content=f"""User asked: {user_input}
 
-    # If no tool calls just return
-    if not response.tool_calls:
-        return response.content
+Here are the real-time results from our tools:
+{tool_results}
 
-    # Execute tools
-    for tool_call in response.tool_calls:
-        tool_name = tool_call["name"]
-        tool_args = tool_call["args"]
-        print(f"🔧 Calling: {tool_name} → {tool_args}")
+Please provide a helpful, friendly response based on this data."""))
+    else:
+        messages.append(HumanMessage(content=user_input))
 
-        try:
-            result = tool_map[tool_name].invoke(tool_args) if tool_name in tool_map else "Tool not found"
-        except Exception as e:
-            result = f"Tool error: {str(e)}"
-
-        messages.append(ToolMessage(
-            content=str(result),
-            tool_call_id=tool_call["id"]
-        ))
-
-    # Pass 2 — final answer using base LLM without tools
-    base_llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
-        api_key=os.getenv("GROQ_API_KEY"),
-        temperature=0.7
-    )
-    final = base_llm.invoke(messages)
-    return final.content
+    response = llm.invoke(messages)
+    return response.content
