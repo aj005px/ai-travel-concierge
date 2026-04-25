@@ -21,6 +21,7 @@ __pycache__/
 # OS files
 .DS_Store
 Thumbs.db
+travel_data.db
 
 # Streamlit secrets
 .streamlit/secrets.toml
